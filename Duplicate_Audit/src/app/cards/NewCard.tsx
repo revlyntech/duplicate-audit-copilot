@@ -4,8 +4,8 @@ import {
 } from "@hubspot/ui-extensions";
 import { useState } from "react";
 
-// Update this when your ngrok URL changes
-const BACKEND_URL = "https://barista-giving-thinly.ngrok-free.dev";
+
+const BACKEND_URL = "https://web-production-a75ed.up.railway.app";
 
 hubspot.extend(({ context, actions }: any) => (
   <DuplicateAuditCard context={context} actions={actions} />
@@ -19,13 +19,11 @@ const DuplicateAuditCard = ({ context, actions }: any) => {
   const [dismissed, setDismissed]   = useState<string[]>([]);
   const [merging, setMerging]       = useState<string | null>(null);
 
-  // Tracks which record the user picked as master per cluster
-  // Key = clusterKey (ids joined), Value = record id chosen as master
   const [userMaster, setUserMaster] = useState<Record<string, string>>({});
 
   const contactId = String(context?.crm?.objectId || "unknown");
 
-  // ── Start audit ───────────────────────────────────────────
+ 
   const runAudit = async () => {
     setStatus("starting");
     setError("");
@@ -44,7 +42,7 @@ const DuplicateAuditCard = ({ context, actions }: any) => {
     } catch (e: any) { setError(e.message); setStatus("error"); }
   };
 
-  // ── Poll for result ────────────────────────────────────────
+
   const pollForResult = async (id: string, attempt: number) => {
     if (attempt > 20) {
       setError("Timed out. Is worker.py running?");
@@ -60,7 +58,7 @@ const DuplicateAuditCard = ({ context, actions }: any) => {
     } catch (e: any) { setError(e.message); setStatus("error"); }
   };
 
-  // ── Merge two records ──────────────────────────────────────
+ 
   const handleMerge = async (
     primaryId: string,
     duplicateId: string,
@@ -99,7 +97,7 @@ const DuplicateAuditCard = ({ context, actions }: any) => {
     (c: any) => !dismissed.includes(c.cluster_ids.join(","))
   ) || [];
 
-  // ── Render ────────────────────────────────────────────────
+
   return (
     <Flex direction="column" gap="md">
       <Heading>Duplicate Audit Copilot</Heading>
@@ -173,7 +171,7 @@ const DuplicateAuditCard = ({ context, actions }: any) => {
             const variant    = conf >= 0.9 ? "error" : conf >= 0.75 ? "warning" : "default";
             const clusterKey = cluster.cluster_ids.join(",");
 
-            // Which record is master — user pick OR system default
+         
             const masterId = userMaster[clusterKey] || cluster.master_id;
             const masterRecord = cluster.records?.find((r: any) => r.id === masterId);
 
