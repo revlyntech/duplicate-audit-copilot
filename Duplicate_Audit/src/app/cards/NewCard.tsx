@@ -44,7 +44,7 @@ const DuplicateAuditCard = ({ context, actions }: any) => {
 
 
   const pollForResult = async (id: string, attempt: number) => {
-    if (attempt > 20) {
+    if (attempt > 60) {
       setError("Timed out. Is worker.py running?");
       setStatus("error"); return;
     }
