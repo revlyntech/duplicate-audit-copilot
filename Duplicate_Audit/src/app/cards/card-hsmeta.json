@@ -1,0 +1,12 @@
+{
+  "uid": "DuplicateAudit_card",
+  "type": "card",
+  "config": {
+    "name": "Duplicate Audit",
+    "location": "crm.record.tab",
+    "entrypoint": "/app/cards/NewCard.tsx",
+    "objectTypes": [
+      "contacts"
+    ]
+  }
+}
