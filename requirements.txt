@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+upstash-redis
+python-dotenv
+rapidfuzz
+requests
