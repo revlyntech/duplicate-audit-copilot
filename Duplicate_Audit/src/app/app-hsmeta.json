@@ -17,7 +17,7 @@
     },
     "permittedUrls": {
       "fetch": [
-        "https://barista-giving-thinly.ngrok-free.dev"
+        "https://web-production-a75ed.up.railway.app"
       ],
       "iframe": [],
       "img": []
