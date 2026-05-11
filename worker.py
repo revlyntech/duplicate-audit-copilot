@@ -12,7 +12,6 @@ r = Redis.from_env()
 HUBSPOT_API_KEY = os.getenv("HUBSPOT_API_KEY")
 
 def get_contact(contact_id: str) -> dict:
-    
     resp = requests.get(
         f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}",
         headers={"Authorization": f"Bearer {HUBSPOT_API_KEY}"},
@@ -22,96 +21,115 @@ def get_contact(contact_id: str) -> dict:
     return resp.json()
 
 def search_contacts(filters: list) -> list:
-    
     resp = requests.post(
         "https://api.hubapi.com/crm/v3/objects/contacts/search",
         headers={
             "Authorization": f"Bearer {HUBSPOT_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type":  "application/json"
         },
         json={
             "filterGroups": [{"filters": filters}],
-            "properties": ["firstname", "lastname", "email", "phone", "company"],
-            "limit": 100
+            "properties":   ["firstname", "lastname", "email", "phone", "company"],
+            "limit":        100
         },
         timeout=15
     )
     return resp.json().get("results", [])
 
 def format_contact(contact: dict) -> dict:
-   
     props = contact.get("properties", {})
     return {
-        "id": contact["id"],
-        "name": f"{props.get('firstname','') or ''} {props.get('lastname','') or ''}".strip(),
-        "email": props.get("email") or "",
-        "phone": props.get("phone") or "",
+        "id":      contact["id"],
+        "name":    f"{props.get('firstname','') or ''} {props.get('lastname','') or ''}".strip(),
+        "email":   props.get("email")   or "",
+        "phone":   props.get("phone")   or "",
         "company": props.get("company") or "",
     }
 
+def clean_phone(phone: str) -> str:
+    return "".join(c for c in (phone or "") if c.isdigit())
+
 def find_candidates(contact_id: str) -> list:
-    
+  
     raw = get_contact(contact_id)
     if "id" not in raw:
         print(f"Contact {contact_id} not found")
         return []
 
     target = format_contact(raw)
-    print(f"Target contact: {target['name']} | {target['email']} | {target['phone']}")
+    print(f"Target: {target['name']} | {target['email']} | {target['phone']}")
 
-    candidates = {contact_id: target}  
+    candidates = {contact_id: target}
 
-   
     if target["email"]:
         results = search_contacts([{
             "propertyName": "email",
-            "operator": "EQ",
-            "value": target["email"]
+            "operator":     "EQ",
+            "value":        target["email"]
         }])
-        for r_contact in results:
-            if r_contact["id"] not in candidates:
-                candidates[r_contact["id"]] = format_contact(r_contact)
+        for c in results:
+            if c["id"] not in candidates:
+                candidates[c["id"]] = format_contact(c)
 
-   
     if target["phone"]:
-        digits = "".join(c for c in target["phone"] if c.isdigit())
-        if len(digits) >= 7:
+        digits = clean_phone(target["phone"])
+
+        if digits:
             results = search_contacts([{
                 "propertyName": "phone",
-                "operator": "CONTAINS_TOKEN",
-                "value": digits[-7:]
+                "operator":     "CONTAINS_TOKEN",
+                "value":        digits
             }])
-            for r_contact in results:
-                if r_contact["id"] not in candidates:
-                    candidates[r_contact["id"]] = format_contact(r_contact)
+            for c in results:
+                if c["id"] not in candidates:
+                    candidates[c["id"]] = format_contact(c)
 
-    
+        results = search_contacts([{
+            "propertyName": "phone",
+            "operator":     "EQ",
+            "value":        target["phone"]
+        }])
+        for c in results:
+            if c["id"] not in candidates:
+                candidates[c["id"]] = format_contact(c)
+
+        if len(digits) > 10:
+            last10 = digits[-10:]
+            results = search_contacts([{
+                "propertyName": "phone",
+                "operator":     "CONTAINS_TOKEN",
+                "value":        last10
+            }])
+            for c in results:
+                if c["id"] not in candidates:
+                    candidates[c["id"]] = format_contact(c)
+
     name_parts = target["name"].split()
-    if len(name_parts) >= 1 and name_parts[0]:
+    if name_parts:
         results = search_contacts([{
             "propertyName": "firstname",
-            "operator": "EQ",
-            "value": name_parts[0]
+            "operator":     "EQ",
+            "value":        name_parts[0]
         }])
-        for r_contact in results:
-            if r_contact["id"] not in candidates:
-                candidates[r_contact["id"]] = format_contact(r_contact)
+        for c in results:
+            if c["id"] not in candidates:
+                candidates[c["id"]] = format_contact(c)
 
-    if len(name_parts) >= 2 and name_parts[-1]:
+    if len(name_parts) >= 2:
         results = search_contacts([{
             "propertyName": "lastname",
-            "operator": "EQ",
-            "value": name_parts[-1]
+            "operator":     "EQ",
+            "value":        name_parts[-1]
         }])
-        for r_contact in results:
-            if r_contact["id"] not in candidates:
-                candidates[r_contact["id"]] = format_contact(r_contact)
+        for c in results:
+            if c["id"] not in candidates:
+                candidates[c["id"]] = format_contact(c)
 
-    print(f"Found {len(candidates)} candidates to compare (vs 41,563 before)")
+    print(f"Found {len(candidates)} candidates to compare")
     return list(candidates.values())
 
 
-print("Worker started — waiting for jobs...")
+print(" Worker started — waiting for jobs...")
 
 while True:
     job_id = None
@@ -121,7 +139,7 @@ while True:
             time.sleep(2)
             continue
 
-        print(f"⚡ Processing job: {job_id}")
+        print(f" Processing job: {job_id}")
         r.set(f"{job_id}:status", "processing")
 
         raw = r.get(f"{job_id}:data")
@@ -134,8 +152,7 @@ while True:
         if isinstance(data, str):
             data = json.loads(data)
 
-       
-        records = data.get("records", [])
+        records  = data.get("records", [])
         contact_id = records[0].get("id") if records else None
 
         if not contact_id:
@@ -143,18 +160,17 @@ while True:
             r.set(f"{job_id}:error", "No contact ID in job")
             continue
 
-       
         candidates = find_candidates(contact_id)
-        print(f"Comparing {len(candidates)} candidate contacts")
+        print(f" Comparing {len(candidates)} candidates")
 
         result = run_duplicate_detection(candidates)
 
         r.set(f"{job_id}:result", json.dumps(result))
         r.set(f"{job_id}:status", "done")
-        print(f"Done: {job_id} — {len(result.get('clusters', []))} clusters found")
+        print(f" Done: {job_id} — {len(result.get('clusters', []))} clusters found")
 
     except Exception as e:
-        print(f"Worker error: {e}")
+        print(f" Worker error: {e}")
         if job_id:
             try:
                 r.set(f"{job_id}:status", "error")
