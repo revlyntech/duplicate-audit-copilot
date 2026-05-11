@@ -9,6 +9,8 @@ load_dotenv()
 CLAUDE_API_KEY  = os.getenv("CLAUDE_API_KEY")
 HUBSPOT_API_KEY = os.getenv("HUBSPOT_API_KEY")
 
+# UTILS
+
 def normalize(text):
     return text.lower().strip() if text else ""
 
@@ -42,10 +44,7 @@ def name_similarity(a, b):
         first_b = parts_b[0] if parts_b else ""
         return 0.4 if first_a == first_b else 0
 
-    last_a  = parts_a[-1]
-    last_b  = parts_b[-1]
-    last_sim = fuzz.ratio(last_a, last_b) / 100
-
+    last_sim = fuzz.ratio(parts_a[-1], parts_b[-1]) / 100
     if last_sim < 0.70:
         return 0
 
@@ -57,12 +56,12 @@ def company_similarity(a, b):
     cb = normalize(b.get("company", ""))
     if not ca or not cb:
         return 0
-  
+   
     if len(ca) < 5 or len(cb) < 5:
         return 0
     return max(fuzz.token_set_ratio(ca, cb), fuzz.partial_ratio(ca, cb)) / 100
 
-# SCORING + REASONS
+# SCORING
 
 def calculate_score(a, b):
     score = 0
@@ -92,42 +91,36 @@ def get_match_reasons(a, b):
 
 def get_matched_fields(a, b):
     fields = []
-    if email_match(a, b):                  fields.append("email")
-    if phone_match(a, b):                  fields.append("phone")
-    if name_similarity(a, b) >= 0.70:     fields.append("name")
-    if company_similarity(a, b) >= 0.65:  fields.append("company")
+    if email_match(a, b):                 fields.append("email")
+    if phone_match(a, b):                 fields.append("phone")
+    if name_similarity(a, b) >= 0.70:    fields.append("name")
+    if company_similarity(a, b) >= 0.65: fields.append("company")
     return fields
 
-#  BLOCKING
+# BLOCKING
 
 def create_blocks(records):
     blocks = {}
     for r in records:
         keys = set()
-
         if r.get("email"):
             keys.add("email_domain:" + r["email"].split("@")[-1])
             keys.add("email_exact:"  + normalize(r["email"]))
-
         if r.get("phone"):
             digits = "".join(c for c in r["phone"] if c.isdigit())
             if digits:
                 keys.add("phone:" + digits[-7:])
-
         if r.get("name"):
             parts = normalize(r["name"]).split()
             if len(parts) >= 2:
                 keys.add("lastname:" + parts[-1][:5])
             else:
-           
                 keys.add("firstname:" + parts[0][:5])
-
         for key in keys:
             blocks.setdefault(key, []).append(r)
-
     return blocks
 
-#  AI VALIDATION
+# AI VALIDATION
 
 def batch_validate_with_ai(pairs, record_map):
     results = {}
@@ -135,12 +128,16 @@ def batch_validate_with_ai(pairs, record_map):
         return results
 
     prompt = (
-        "You are a strict CRM data expert. Only confirm duplicates when there is "
-        "strong evidence: same email, same phone, or nearly identical FULL name "
-        "(first + last) with same company. "
-        "Do NOT confirm duplicates based on shared first name alone. "
-        "Different last names = different people.\n\n"
-        "Determine if each pair is a real duplicate:\n"
+        "You are a strict CRM deduplication expert. "
+        "Only confirm duplicates when there is STRONG evidence:\n"
+        "  - Same email address, OR\n"
+        "  - Same phone number, OR\n"
+        "  - Identical full name (first + last) AND same or very similar company name.\n\n"
+        "IMPORTANT RULES:\n"
+        "  - Different companies = different people, even with the same name.\n"
+        "  - Do NOT confirm based on shared first name alone.\n"
+        "  - Do NOT confirm if emails are different AND phones are different AND companies are different.\n\n"
+        "Pairs to evaluate:\n"
     )
     for idx, (a_id, b_id) in enumerate(pairs):
         a = record_map[a_id]
@@ -153,10 +150,7 @@ def batch_validate_with_ai(pairs, record_map):
             f"phone={b.get('phone')}  company={b.get('company')}\n"
         )
 
-    prompt += """
-Return ONLY a JSON array, no other text:
-[{"pair_index": 0, "is_duplicate": true, "reason": "same email"}]
-"""
+    prompt += "\nReturn ONLY a JSON array:\n[{\"pair_index\": 0, \"is_duplicate\": true, \"reason\": \"...\"}]\n"
 
     try:
         response = requests.post(
@@ -208,7 +202,7 @@ class UnionFind:
             clusters.setdefault(root, []).append(node)
         return list(clusters.values())
 
-#  MASTER RECORD
+# MASTER RECORD
 
 def record_quality_score(r):
     score = 0
@@ -230,7 +224,7 @@ def generate_merge(cluster, master):
         merged[field] = values[0] if values else ""
     return merged
 
-#  CONFIDENCE
+# CONFIDENCE
 
 def confidence(cluster):
     scores = []
@@ -239,7 +233,7 @@ def confidence(cluster):
             scores.append(calculate_score(cluster[i], cluster[j]))
     return round(sum(scores) / len(scores), 2) if scores else 0
 
-# MAIN DETECTION
+#  MAIN DETECTION
 
 def run_duplicate_detection(records):
     blocks        = create_blocks(records)
@@ -250,12 +244,21 @@ def run_duplicate_detection(records):
     for block in blocks.values():
         for i in range(len(block)):
             for j in range(i + 1, len(block)):
-                a, b  = block[i], block[j]
+                a, b = block[i], block[j]
+
+                has_email_match   = email_match(a, b)
+                has_phone_match   = phone_match(a, b)
+                has_company_match = company_similarity(a, b) >= 0.65
+
+                if not has_email_match and not has_phone_match:
+                    if not has_company_match:
+                        continue
+
                 score = calculate_score(a, b)
 
-                if score > 0.85:                  
+                if score > 0.85:
                     pair_matches.append((a["id"], b["id"]))
-                elif score > 0.70:                  
+                elif score > 0.70:
                     ai_candidates.append((a["id"], b["id"]))
 
     record_map = {r["id"]: r for r in records}
@@ -306,7 +309,6 @@ def run_duplicate_detection(records):
             ],
         })
 
-    # Highest confidence first
     results.sort(key=lambda x: x["confidence"], reverse=True)
 
     return {
